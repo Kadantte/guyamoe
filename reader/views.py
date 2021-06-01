@@ -53,8 +53,7 @@ def hit_count(request):
     return HttpResponse(json.dumps({}), content_type="application/json")
 
 
-@cache_control(public=True, max_age=60, s_maxage=60)
-def series_page_data(series_slug):
+def series_page_data(request, series_slug):
     series_page_dt = cache.get(f"series_page_dt_{series_slug}")
     if not series_page_dt:
         series = get_object_or_404(Series, slug=series_slug)
@@ -62,14 +61,7 @@ def series_page_data(series_slug):
             "series", "group"
         )
         latest_chapter = chapters.latest("uploaded_on") if chapters else None
-        vols = Volume.objects.filter(series=series).order_by("-volume_number")
-        cover_vol_url = ""
-        cover_vol_url_webp = ""
-        for vol in vols:
-            if vol.volume_cover:
-                cover_vol_url = f"/media/{vol.volume_cover}"
-                cover_vol_url_webp = cover_vol_url.rsplit(".", 1)[0] + ".webp"
-                break
+        cover_vol_url, cover_vol_url_webp = series.get_latest_volume_cover_path()
         content_series = ContentType.objects.get(app_label="reader", model="series")
         hit, _ = HitCount.objects.get_or_create(
             content_type=content_series, object_id=series.id
@@ -114,6 +106,7 @@ def series_page_data(series_slug):
                 [key, sorted(value, key=lambda x: float(x[0]), reverse=True)]
             )
         chapter_list.sort(key=lambda x: float(x[0]), reverse=True)
+
         series_page_dt = {
             "series": series.name,
             "alt_titles": series.alternative_titles.split(", ")
@@ -149,6 +142,7 @@ def series_page_data(series_slug):
                 "download",
             ],
             "reader_modifier": "read/manga",
+            "embed_image": request.build_absolute_uri(series.get_embed_image_path()),
         }
         cache.set(f"series_page_dt_{series_slug}", series_page_dt, 3600 * 12)
     return series_page_dt
@@ -157,7 +151,7 @@ def series_page_data(series_slug):
 @cache_control(public=True, max_age=60, s_maxage=60)
 @decorator_from_middleware(OnlineNowMiddleware)
 def series_info(request, series_slug):
-    data = series_page_data(series_slug)
+    data = series_page_data(request, series_slug)
     data["version_query"] = settings.STATIC_VERSION
     return render(request, "reader/series.html", data)
 
@@ -166,13 +160,13 @@ def series_info(request, series_slug):
 @cache_control(public=True, max_age=60, s_maxage=60)
 @decorator_from_middleware(OnlineNowMiddleware)
 def series_info_admin(request, series_slug):
-    data = series_page_data(series_slug)
+    data = series_page_data(request, series_slug)
     data["version_query"] = settings.STATIC_VERSION
     data["available_features"].append("admin")
     return render(request, "reader/series.html", data)
 
 
-def get_all_metadata(series_slug):
+def get_all_metadata(request, series_slug):
     series_metadata = cache.get(f"series_metadata_{series_slug}")
     if not series_metadata:
         series = Series.objects.filter(slug=series_slug).first()
@@ -181,6 +175,9 @@ def get_all_metadata(series_slug):
         chapters = Chapter.objects.filter(series=series).select_related("series")
         series_metadata = {}
         series_metadata["indexed"] = series.indexed
+        series_metadata["embed_image"] = request.build_absolute_uri(
+            series.get_embed_image_path()
+        )
         for chapter in chapters:
             series_metadata[chapter.slug_chapter_number()] = {
                 "series_name": chapter.series.name,
@@ -197,7 +194,7 @@ def get_all_metadata(series_slug):
 @decorator_from_middleware(OnlineNowMiddleware)
 def reader(request, series_slug, chapter, page=None):
     if page:
-        data = get_all_metadata(series_slug)
+        data = get_all_metadata(request, series_slug)
         if data and chapter in data:
             data[chapter]["relative_url"] = f"read/manga/{series_slug}/{chapter}/1"
             data[chapter]["api_path"] = f"/api/series/"
@@ -205,6 +202,7 @@ def reader(request, series_slug, chapter, page=None):
             data[chapter]["version_query"] = settings.STATIC_VERSION
             data[chapter]["first_party"] = True
             data[chapter]["indexed"] = data["indexed"]
+            data[chapter]["embed_image"] = data["embed_image"]
             return render(request, "reader/reader.html", data[chapter])
         else:
             return render(request, "homepage/how_cute_404.html", status=404)

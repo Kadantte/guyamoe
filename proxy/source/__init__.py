@@ -4,13 +4,19 @@ from typing import List
 
 from django.conf import settings
 from django.http import HttpResponse
+from django.http.response import HttpResponseRedirect
 from django.shortcuts import redirect, render
 from django.urls import path, re_path
 from django.views.decorators.cache import cache_control
+from django.utils.html import escape
 
 from .data import *
 from .helpers import *
 
+def proxy_redirect(request):
+    if request.path.endswith("/"):
+        request.path = request.path[:-1]
+    return HttpResponseRedirect(f"https://cubari.moe{request.path}/#redirect")
 
 class ProxySource(metaclass=abc.ABCMeta):
     # /proxy/:reader_prefix/slug
@@ -37,8 +43,12 @@ class ProxySource(metaclass=abc.ABCMeta):
     def wrap_chapter_meta(self, meta_id):
         return f"/proxy/api/{self.get_reader_prefix()}/chapter/{meta_id}/"
 
+    def process_description(self, desc):
+        return escape(desc)
+
     @cache_control(public=True, max_age=60, s_maxage=60)
     def reader_view(self, request, meta_id, chapter, page=None):
+        return proxy_redirect(request)
         if page:
             data = self.series_api_handler(meta_id)
             if data:
@@ -51,7 +61,7 @@ class ProxySource(metaclass=abc.ABCMeta):
                     data["reader_modifier"] = f"proxy/{self.get_reader_prefix()}"
                     data["chapter_number"] = chapter.replace("-", ".")
                     return render(request, "reader/reader.html", data)
-            return HttpResponse(status=500)
+            return render(request, "homepage/thonk_500.html", status=500)
         else:
             return redirect(
                 f"reader-{self.get_reader_prefix()}-chapter-page", meta_id, chapter, "1"
@@ -59,35 +69,41 @@ class ProxySource(metaclass=abc.ABCMeta):
 
     @cache_control(public=True, max_age=60, s_maxage=60)
     def series_view(self, request, meta_id):
+        return proxy_redirect(request)
         data = self.series_page_handler(meta_id)
         if data:
             data = data.objectify()
+            data["synopsis"] = self.process_description(data["synopsis"])
             data["version_query"] = settings.STATIC_VERSION
             data["relative_url"] = f"proxy/{self.get_reader_prefix()}/{meta_id}"
             data["reader_modifier"] = f"proxy/{self.get_reader_prefix()}"
             return render(request, "reader/series.html", data)
         else:
-            return HttpResponse(status=500)
+            return render(request, "homepage/thonk_500.html", status=500)
 
     @cache_control(public=True, max_age=60, s_maxage=60)
     def series_api_view(self, request, meta_id):
+        return proxy_redirect(request)
         data = self.series_api_handler(meta_id)
         if data:
             data = data.objectify()
+            data["description"] = self.process_description(data["description"])
             return HttpResponse(json.dumps(data), content_type="application/json")
         else:
-            return HttpResponse(status=500)
+            return render(request, "homepage/thonk_500.html", status=500)
 
     @cache_control(public=True, max_age=60, s_maxage=60)
     def chapter_api_view(self, request, meta_id):
+        return proxy_redirect(request)
         data = self.chapter_api_handler(meta_id)
+
         if data:
             data = data.objectify()
             return HttpResponse(
                 json.dumps(data["pages"]), content_type="application/json"
             )
         else:
-            return HttpResponse(status=500)
+            return render(request, "homepage/thonk_500.html", status=500)
 
     def register_api_routes(self):
         """Routes will be under /proxy/api/<route>"""
@@ -101,7 +117,7 @@ class ProxySource(metaclass=abc.ABCMeta):
                 f"{self.get_reader_prefix()}/chapter/<str:meta_id>/",
                 self.chapter_api_view,
                 name=f"api-{self.get_reader_prefix()}-chapter-data",
-            )
+            ),
         ]
 
     def register_shortcut_routes(self):

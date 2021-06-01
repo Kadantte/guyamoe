@@ -13,6 +13,7 @@ from django.views.decorators.cache import cache_control
 from django.views.decorators.csrf import csrf_exempt
 
 from reader.models import Chapter, ChapterIndex, Group, Series, Volume
+from reader.views import series_page_data
 from reader.users_cache_lib import get_user_ip
 
 from .api import (
@@ -24,6 +25,7 @@ from .api import (
     get_chapter_preferred_sort,
     series_data_cache,
     zip_chapter,
+    set_cors_headers,
 )
 
 
@@ -33,6 +35,13 @@ def get_series_data(request, series_slug):
     if not series_api_data:
         series_api_data = series_data_cache(series_slug)
     return HttpResponse(json.dumps(series_api_data), content_type="application/json")
+
+
+@cache_control(public=True, max_age=60, s_maxage=60)
+def get_series_page_data_req(request, series_slug):
+    data = series_page_data(request, series_slug)
+    data["version_query"] = settings.STATIC_VERSION
+    return HttpResponse(json.dumps(data), content_type="application/json")
 
 
 @cache_control(public=True, max_age=900, s_maxage=900)
@@ -195,10 +204,10 @@ def upload_new_chapter(request, series_slug):
 @csrf_exempt
 @cache_control(public=True, max_age=3600, s_maxage=3600)
 def get_volume_covers(request, series_slug):
-    if request.method == "POST":
-        covers = cache.get(f"vol_covers_{series_slug}")
-        if not covers:
-            series = Series.objects.get(slug=series_slug)
+    covers = cache.get(f"vol_covers_{series_slug}")
+    if not covers:
+        series = Series.objects.filter(slug=series_slug).first()
+        if series:
             volume_covers = (
                 Volume.objects.filter(series=series)
                 .order_by("volume_number")
@@ -210,15 +219,40 @@ def get_volume_covers(request, series_slug):
                         cover[0],
                         f"/media/{str(cover[1])}",
                         f"/media/{str(cover[1]).rsplit('.', 1)[0]}.webp",
+                        f"/media/{str(cover[1]).rsplit('.', 1)[0]}_blur.{str(cover[1]).rsplit('.', 1)[1]}",
                     ]
                     for cover in volume_covers
                     if cover[1]
                 ]
             }
             cache.set(f"vol_covers_{series_slug}", covers)
-        return HttpResponse(json.dumps(covers), content_type="application/json")
+            return HttpResponse(json.dumps(covers), content_type="application/json")
     else:
-        return HttpResponse(json.dumps({}), content_type="application/json")
+        return HttpResponse(json.dumps(covers), content_type="application/json")
+    return HttpResponse(json.dumps({}), content_type="application/json", status="204")
+
+
+@cache_control(public=True, max_age=3600, s_maxage=3600)
+def get_volume_cover(request, series_slug, volume_number):
+    cover = cache.get(f"vol_cover{volume_number}_{series_slug}")
+    if not cover:
+        series = Series.objects.filter(slug=series_slug).first()
+        if series:
+            volume = Volume.objects.filter(
+                series=series, volume_number=volume_number
+            ).first()
+            if volume:
+                cover = [
+                    volume.volume_number,
+                    f"/media/{str(volume.volume_cover)}",
+                    f"/media/{str(volume.volume_cover).rsplit('.', 1)[0]}.webp",
+                    f"/media/{str(volume.volume_cover).rsplit('.', 1)[0]}_blur.{str(volume.volume_cover).rsplit('.', 1)[1]}",
+                ]
+                cache.set(f"vol_cover{volume_number}_{series_slug}", cover)
+                return HttpResponse(json.dumps(cover), content_type="application/json")
+    else:
+        return HttpResponse(json.dumps(cover), content_type="application/json")
+    return HttpResponse(json.dumps({}), content_type="application/json", status="204")
 
 
 @csrf_exempt
@@ -270,19 +304,21 @@ def black_hole_mail(request):
         else:
             user_sent_count += 1
             if user_sent_count > 4:
-                return HttpResponse(
+                response = HttpResponse(
                     json.dumps({"error": "Error: sending mail too frequently."}),
                     content_type="application/json",
                 )
+                return set_cors_headers(response)
             else:
                 cache.set(f"mail_user_ip_{user_ip}", user_sent_count, 30)
         if len(text) > 2000:
-            return HttpResponse(
+            response = HttpResponse(
                 json.dumps(
                     {"error": "Error: message too long. can only send 2000 characters."}
                 ),
                 content_type="application/json",
             )
+            return set_cors_headers(response)
         try:
             webhook = Webhook.partial(
                 settings.MAIL_DISCORD_WEBHOOK_ID,
@@ -305,7 +341,8 @@ def black_hole_mail(request):
             feedback_file = str(int(datetime.utcnow().timestamp()))
             with open(os.path.join(feedback_folder, f"{feedback_file}.txt"), "w") as f:
                 f.write(text)
-        return HttpResponse(
+        response = HttpResponse(
             json.dumps({"success": "Mail successfully crossed the event horizon"}),
             content_type="application/json",
         )
+        return set_cors_headers(response)

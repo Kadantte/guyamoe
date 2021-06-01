@@ -1,6 +1,8 @@
 import os
 from datetime import datetime, timezone
+from random import randint
 
+from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
@@ -28,6 +30,27 @@ class Group(models.Model):
 
     def __str__(self):
         return self.name
+
+
+def embed_image_path(instance, filename):
+    return os.path.join("manga", instance.slug, "static", str(filename))
+
+
+def new_volume_folder(instance):
+    return os.path.join(
+        "manga",
+        instance.series.slug,
+        "volume_covers",
+        str(instance.volume_number),
+    )
+
+def new_volume_path_file_name(instance, filename):
+    _, ext = os.path.splitext(filename)
+    new_filename = str(randint(10000, 99999)) + ext
+    return os.path.join(
+        new_volume_folder(instance),
+        new_filename,
+    )
 
 
 class Series(models.Model):
@@ -61,6 +84,8 @@ class Series(models.Model):
         max_length=2, choices=SCRAPING_SOURCES, default=MANGADEX
     )
     scraping_identifiers = models.TextField(blank=True, null=True)
+    use_latest_vol_cover_for_embed = models.BooleanField(default=False)
+    embed_image = models.ImageField(upload_to=embed_image_path, blank=True, null=True)
 
     def __str__(self):
         return self.name
@@ -68,18 +93,27 @@ class Series(models.Model):
     def get_absolute_url(self):
         return f"/read/manga/{self.slug}/"
 
+    def get_latest_volume_cover_path(self):
+        vols = Volume.objects.filter(series=self).order_by("-volume_number")
+        for vol in vols:
+            if vol.volume_cover:
+                cover_vol_url = f"/media/{vol.volume_cover}"
+                return cover_vol_url, cover_vol_url.rsplit(".", 1)[0] + ".webp"
+        else:
+            return "", ""
+
+    def get_embed_image_path(self):
+        if self.use_latest_vol_cover_for_embed:
+            embed_image, _ = self.get_latest_volume_cover_path()
+            return embed_image
+        elif self.embed_image:
+            return f"/media/{self.embed_image}"
+        else:
+            return ""
+
     class Meta:
         ordering = ("name",)
-
-
-def path_file_name(instance, filename):
-    return os.path.join(
-        "manga",
-        instance.series.slug,
-        "volume_covers",
-        str(instance.volume_number),
-        filename,
-    )
+        verbose_name_plural = "series"
 
 
 class Volume(models.Model):
@@ -87,7 +121,7 @@ class Volume(models.Model):
     series = models.ForeignKey(
         Series, blank=False, null=False, on_delete=models.CASCADE
     )
-    volume_cover = models.ImageField(blank=True, upload_to=path_file_name)
+    volume_cover = models.ImageField(blank=True, upload_to=new_volume_path_file_name)
 
     class Meta:
         unique_together = (
@@ -114,6 +148,10 @@ class Chapter(models.Model):
     version = models.PositiveSmallIntegerField(blank=True, null=True, default=None)
     preferred_sort = models.CharField(max_length=200, blank=True, null=True)
     scraper_hash = models.CharField(max_length=32, blank=True)
+    reprocess_metadata = models.BooleanField(
+        default=False,
+        help_text="Check this and save to recreate/reprocess other chapter data (preview versions of the chapter and chapter index). This field will automatically uncheck on save. Chapter reindexing will be kicked off in the background.",
+    )
 
     def clean_chapter_number(self):
         return (
@@ -165,7 +203,7 @@ class Chapter(models.Model):
 
 
 class ChapterIndex(models.Model):
-    word = models.CharField(max_length=48, db_index=True)
+    word = models.CharField(max_length=128, db_index=True)
     chapter_and_pages = models.TextField()
     series = models.ForeignKey(Series, on_delete=models.CASCADE)
 
