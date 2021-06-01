@@ -4,7 +4,7 @@ application:
   project: "nhentai"
   organization: "QoveryCommunity"
   databases:
-- type: postgresql # qovery will create a managed PostgreSQL database
+- type: postgresql
   version: 12
   name: psql
   storage:
