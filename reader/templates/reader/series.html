@@ -6,8 +6,13 @@
 <meta name="description" content="Read {{ series }} manga series by {{ author }}.{{ alt_titles_str|safe }}" />
 <meta name="twitter:card" content="summary" />
 <meta name="twitter:title" content="Read {{ series }} | {{ brand.name }}" />
+{% if embed_image %}
+<meta name="twitter:image" content="{{ embed_image }}" />
+<meta property="og:image" content="{{ embed_image }}">
+{% else %}
 <meta name="twitter:image" content="{{ brand.image_url }}" />
-<meta property="og:image" content="{{ brand.image_url }}" />
+<meta property="og:image" content="{{ brand.image_url }}">
+{% endif %}
 <meta name="author" content="{{ author }}" />
 {% endblock %}
 
@@ -437,7 +442,11 @@ var reading_button = null;
 						</div>
 						<div class="col-3">
 							<label for="volumeNumber" >Volume</label>
-							<input required type="number" step="1.0" class="form-control-sm col-8" name="volumeNumber" id="volumeNumber" value="{{ chapter_list.0.5 }}">
+							{% if  chapter_list|length == 0 or chapter_list.0.6 == "null" %}
+							<input required type="number" step="1.0" class="form-control-sm col-8" name="volumeNumber" id="volumeNumber" value="1">
+							{% else %}
+							<input required type="number" step="1.0" class="form-control-sm col-8" name="volumeNumber" id="volumeNumber" value="{{ chapter_list.0.6 }}">
+							{% endif %}
 						</div>
 					</div>
 					<div class="row mt-4">
