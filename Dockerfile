@@ -1,5 +1,6 @@
 FROM python:3.6
+WORKDIR /guyamoe
 RUN pip install -r requirements.txt
-CMD [ "python", "./init.py" ]
-CMD [ "python", "./manage.py createsuperuser" ]
-CMD [ "python", "./manage.py runserver" ]
+RUN python init.py
+RUN python manage.py createsuperuser
+RUN python manage.py runserver
