@@ -3,6 +3,10 @@ application:
   name: "guyamoe"
   project: "nhentai"
   organization: "QoveryCommunity"
+  databases:
+- type: postgresql # qovery will create a managed PostgreSQL database
+  version: 12
+  name: psql
   storage:
   - name: "media"
     size: "200"
