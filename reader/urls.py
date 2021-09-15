@@ -44,6 +44,11 @@ urlpatterns = [
         views.reader,
         name="reader-series-chapter",
     ),
+    re_path(
+        r"^manga/(?P<url_str>[\w-]+)/(?P<series_slug>[\w-]+)/$",
+        views.series_info_canonical,
+        name="reader-manga-canonical",
+    ),
     re_path(r"^update_view_count/", views.hit_count, name="reader-view-count"),
     re_path(
         r"^other/rss/all$",
